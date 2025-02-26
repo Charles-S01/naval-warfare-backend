@@ -1,0 +1,6 @@
+-- AlterTable
+ALTER TABLE "Coordinate" ALTER COLUMN "gameBoardId" DROP NOT NULL,
+ALTER COLUMN "shipId" DROP NOT NULL;
+
+-- AlterTable
+ALTER TABLE "Player" ALTER COLUMN "gameId" DROP NOT NULL;
