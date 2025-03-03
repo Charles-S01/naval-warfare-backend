@@ -36,6 +36,9 @@ async function getGameBoard({ playerId }) {
             where: {
                 playerId: playerId,
             },
+            include: {
+                Ships: true,
+            },
         })
         console.log("Gameboard:", gameboard)
         return gameboard
@@ -65,10 +68,35 @@ async function getGame({ gameId }) {
                 id: gameId,
             },
             include: {
-                Players: true,
+                Players: {
+                    include: {
+                        gameBoard: {
+                            include: {
+                                Attacks: true,
+                                Ships: {
+                                    include: {
+                                        Coordinates: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
             },
         })
         return game
+    } catch (error) {
+        console.log(error)
+    }
+}
+
+async function deleteGame({ gameId }) {
+    try {
+        await prisma.game.delete({
+            where: {
+                id: gameId,
+            },
+        })
     } catch (error) {
         console.log(error)
     }
@@ -79,4 +107,5 @@ module.exports = {
     getGame,
     createGameboard,
     getGameBoard,
+    deleteGame,
 }

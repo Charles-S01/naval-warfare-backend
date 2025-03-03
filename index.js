@@ -10,6 +10,7 @@ const {
     getGame,
     createGameboard,
     getGameBoard,
+    deleteGame,
 } = require("./controllers/gameController")
 const { permission } = require("node:process")
 
@@ -41,10 +42,15 @@ io.on("connection", (socket) => {
     socket.on("smt", (msg) => {
         console.log(msg)
     })
-    socket.on("createGame", async (callback) => {
+    socket.on("createGame", async ({ existingGameId }, callback) => {
+        console.log("Existing game id:", existingGameId)
         const gameId = randomUUID()
         socket.join(gameId)
         const playerId = randomUUID()
+
+        if (existingGameId) {
+            await deleteGame({ gameId: existingGameId })
+        }
 
         await createGame({ gameId, playerTurn: playerId })
         await createPlayer({ playerId, gameId })
@@ -64,7 +70,6 @@ io.on("connection", (socket) => {
             let joined = false
             let errorMsg = null
             let roomSize = null
-            let isFullGame = false
             const playerId = randomUUID()
             console.log("joinGame event")
 
@@ -74,6 +79,7 @@ io.on("connection", (socket) => {
                 console.log("room size while trying to join game:", roomSize)
                 // check room capacity
                 if (roomSize >= 2) {
+                    console.log("Game full")
                     errorMsg = "Game full"
                 } else if (roomSize === 1) {
                     socket.join(gameId)
@@ -83,7 +89,6 @@ io.on("connection", (socket) => {
                     const game = await getGame({ gameId })
                     console.log(game)
 
-                    // isFullGame = roomSize === 1 ? true : false
                     io.to(gameId).emit("userJoin", {
                         msg: "User has joined",
                         game,
@@ -91,6 +96,7 @@ io.on("connection", (socket) => {
                     joined = true
                 }
             } else {
+                console.log("Game does not exist")
                 errorMsg = "Game does not exist"
             }
             // const room = io.sockets.adapter.rooms.get(gameId)
@@ -101,51 +107,130 @@ io.on("connection", (socket) => {
         }
     )
 
-    socket.on("placeShips", async ({ gameId, playerId, r, c }) => {
+    socket.on("placeShips", async ({ gameId, playerId, shipCoordsSelect }) => {
         console.log("placeShips() " + "playerId: " + playerId)
-        const gameboard = await getGameBoard({ playerId })
+        try {
+            const gameboard = await getGameBoard({ playerId })
 
-        const ship = await prisma.ship.create({
-            data: {
-                id: randomUUID(),
-                gameBoardId: gameboard.id,
-            },
-        })
-        await prisma.coordinate.create({
-            data: {
-                id: randomUUID(),
-                row: r,
-                col: c,
-                ship: {
-                    connect: {
-                        id: ship.id,
+            const { row, col } = shipCoordsSelect[0]
+
+            if (gameboard.Ships.length > 0) {
+                return
+            }
+
+            const ship = await prisma.ship.create({
+                data: {
+                    id: randomUUID(),
+                    gameBoardId: gameboard.id,
+                },
+            })
+            await prisma.coordinate.create({
+                data: {
+                    id: randomUUID(),
+                    row: row,
+                    col: col,
+                    ship: {
+                        connect: {
+                            id: ship.id,
+                        },
                     },
                 },
-            },
-        })
-        const game = await prisma.game.update({
-            where: {
-                id: gameId,
-            },
-            data: {
-                playersReadyCount: {
-                    increment: 1,
-                },
-            },
-        })
-        if (game.playersReadyCount === 2) {
-            const game = await prisma.game.findUnique({
+            })
+            const game = await prisma.game.update({
                 where: {
                     id: gameId,
+                },
+                data: {
+                    playersReadyCount: {
+                        increment: 1,
+                    },
+                },
+            })
+            if (game.playersReadyCount === 2) {
+                const game = await prisma.game.findUnique({
+                    where: {
+                        id: gameId,
+                    },
+                    include: {
+                        Players: {
+                            include: {
+                                gameBoard: {
+                                    include: {
+                                        Attacks: true,
+                                        Ships: {
+                                            include: {
+                                                Coordinates: true,
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                })
+                console.log("Game ready game: ", game)
+                // const gameboard = await prisma.gameBoard.findUnique({
+                //     where: {
+                //         playerId: playerId,
+                //     },
+                //     include: {
+                //         Coordinates: true,
+                //         Ship: true,
+                //     },
+                // })
+                io.to(gameId).emit("startGame", game)
+            }
+        } catch (error) {
+            console.log(error)
+        }
+    })
+
+    socket.on(
+        "attackSpot",
+        async ({ gameId, playerId, oppId, oppBoardId, row, col }) => {
+            const shipHit = await prisma.gameBoard.findUnique({
+                where: {
+                    playerId: oppId,
+                    Ships: {
+                        some: {
+                            Coordinates: {
+                                some: {
+                                    row: row,
+                                    col: col,
+                                },
+                            },
+                        },
+                    },
+                },
+            })
+            const isHit = shipHit ? true : false
+            await prisma.coordinate.create({
+                data: {
+                    id: randomUUID(),
+                    gameBoardId: oppBoardId,
+                    row: row,
+                    col: col,
+                    type: isHit ? "HIT" : "MISS",
+                },
+            })
+
+            const game = await prisma.game.update({
+                where: {
+                    id: gameId,
+                },
+                data: {
+                    playerTurn: oppId,
+                    winner: isHit ? playerId : null,
                 },
                 include: {
                     Players: {
                         include: {
                             gameBoard: {
                                 include: {
-                                    Ship: {
+                                    Attacks: true,
+                                    Ships: {
                                         include: {
-                                            Coordinate: true,
+                                            Coordinates: true,
                                         },
                                     },
                                 },
@@ -154,19 +239,10 @@ io.on("connection", (socket) => {
                     },
                 },
             })
-            console.log("Game ready game: ", game)
-            // const gameboard = await prisma.gameBoard.findUnique({
-            //     where: {
-            //         playerId: playerId,
-            //     },
-            //     include: {
-            //         Coordinates: true,
-            //         Ship: true,
-            //     },
-            // })
-            io.to(gameId).emit("startGame", game)
+            const event = isHit ? "winner" : "attackAttempt"
+            io.to(gameId).emit("attackAttempt", game)
         }
-    })
+    )
 
     socket.on("endGame", async (gameId) => {
         try {

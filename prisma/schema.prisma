@@ -17,9 +17,8 @@ model Game {
   id                String   @id
   Players           Player[]
   playerTurn        String
-  // isFullGame        Boolean  @default(true)
   playersReadyCount Int      @default(0)
-  // isGameStarted     Boolean  @default(false)
+  winner            String?
 }
 
 model Player {
@@ -31,11 +30,11 @@ model Player {
 }
 
 model GameBoard {
-  id          String       @id @default(uuid())
-  player      Player       @relation(fields: [playerId], references: [id], onDelete: Cascade)
-  playerId    String       @unique
-  Coordinates Coordinate[]
-  Ship        Ship[]
+  id       String       @id @default(uuid())
+  player   Player       @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  playerId String       @unique
+  Attacks  Coordinate[]
+  Ships    Ship[]
 }
 
 model Ship {
@@ -43,7 +42,7 @@ model Ship {
   hits        Int          @default(0)
   gameBoard   GameBoard    @relation(fields: [gameBoardId], references: [id], onDelete: Cascade)
   gameBoardId String
-  Coordinate  Coordinate[]
+  Coordinates Coordinate[]
 }
 
 model Coordinate {
