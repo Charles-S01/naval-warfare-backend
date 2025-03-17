@@ -30,34 +30,48 @@ model Player {
 }
 
 model GameBoard {
-  id       String       @id @default(uuid())
-  player   Player       @relation(fields: [playerId], references: [id], onDelete: Cascade)
-  playerId String       @unique
-  Attacks  Coordinate[]
-  Ships    Ship[]
+  id          String       @id @default(uuid())
+  player      Player       @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  playerId    String       @unique
+  // Attacks  Coordinate[]
+  Ships       Ship[]
+  Coordinates Coordinate[]
 }
 
 model Ship {
-  id          String       @id @default(uuid())
-  hits        Int          @default(0)
-  gameBoard   GameBoard    @relation(fields: [gameBoardId], references: [id], onDelete: Cascade)
+  id          String    @id @default(uuid())
+  shipType    ShipType
+  length      Int
+  hits        Int       @default(0)
+  gameBoard   GameBoard @relation(fields: [gameBoardId], references: [id], onDelete: Cascade)
   gameBoardId String
-  Coordinates Coordinate[]
+  // Coordinates Coordinate[]
+
+  @@unique([gameBoardId, shipType])
 }
 
 model Coordinate {
   id          String     @id @default(uuid())
   row         Int
   col         Int
-  type        CoordType?
+  // type        CoordType?
+  shipType    ShipType?
+  isHit       Boolean?
   gameBoard   GameBoard? @relation(fields: [gameBoardId], references: [id], onDelete: Cascade)
   gameBoardId String?
-  ship        Ship?      @relation(fields: [shipId], references: [id], onDelete: Cascade)
-  shipId      String?
+  // ship        Ship?      @relation(fields: [shipId], references: [id], onDelete: Cascade)
+  // shipId      String?
+
+  @@unique([gameBoardId, row, col])
 }
 
-enum CoordType {
-  SHIP
-  HIT
-  MISS
+// enum CoordType {
+//   HIT
+//   MISS
+// }
+
+enum ShipType {
+  CARRIER
+  SUBMARINE
+  DESTROYER
 }

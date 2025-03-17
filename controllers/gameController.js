@@ -72,12 +72,8 @@ async function getGame({ gameId }) {
                     include: {
                         gameBoard: {
                             include: {
-                                Attacks: true,
-                                Ships: {
-                                    include: {
-                                        Coordinates: true,
-                                    },
-                                },
+                                Coordinates: true,
+                                Ships: true,
                             },
                         },
                     },
