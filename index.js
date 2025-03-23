@@ -17,14 +17,14 @@ const app = express()
 const server = createServer(app)
 const io = new Server(server, {
     cors: {
-        origin: process.env.ORIGIN_URL,
+        origin: "naval-warfare.vercel.app",
     },
     connectionStateRecovery: { maxDisconnectionDuration: 2 * 60 * 1000 },
 })
 
 app.use(
     cors({
-        origin: process.env.ORIGIN_URL,
+        origin: "naval-warfare.vercel.app",
     })
 )
 
