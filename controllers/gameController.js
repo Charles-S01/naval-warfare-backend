@@ -54,6 +54,9 @@ async function createGame({ gameId, playerTurn }) {
                 id: gameId,
                 playerTurn: playerTurn,
             },
+            include: {
+                Players: true,
+            },
         })
         return game
     } catch (error) {

@@ -12,47 +12,43 @@ const {
     getGameBoard,
     deleteGame,
 } = require("./controllers/gameController")
-// const { permission } = require("node:process")
 
 const app = express()
 const server = createServer(app)
 const io = new Server(server, {
     cors: {
-        origin: "http://localhost:5173",
+        origin: process.env.ORIGIN_URL,
     },
     connectionStateRecovery: { maxDisconnectionDuration: 2 * 60 * 1000 },
 })
 
 app.use(
     cors({
-        origin: "http://localhost:5173",
+        origin: process.env.ORIGIN_URL,
     })
 )
 
 io.on("connection", (socket) => {
-    socket.on("createGame", async ({ existingGameId }, callback) => {
-        console.log("Existing game id:", existingGameId)
+    socket.on("createGame", async ({}, callback) => {
         const gameId = randomUUID()
+        socket.gameId = gameId
+        console.log("socket.gameId:", socket.gameId)
         socket.join(gameId)
         const playerId = randomUUID()
 
-        if (existingGameId) {
-            await deleteGame({ gameId: existingGameId })
-        }
-
-        await createGame({ gameId, playerTurn: playerId })
+        const game = await createGame({ gameId, playerTurn: playerId })
         await createPlayer({ playerId, gameId })
         await createGameboard({ playerId })
 
+        io.to(gameId).emit("userJoin", game)
         callback({ gameId, playerId })
-
-        // const room = io.sockets.adapter.rooms.get(gameId)
-        // console.log(room)
-        // console.log("Room size:", room.size)
     })
 
     socket.on("joinGame", async ({ gameIdInput }, callback) => {
         const gameId = gameIdInput
+        socket.gameId = gameId
+        console.log("socket.gameId:", socket.gameId)
+
         let joined = false
         let errorMsg = null
         let roomSize = null
@@ -63,11 +59,20 @@ io.on("connection", (socket) => {
         if (io.sockets.adapter.rooms.has(gameId)) {
             roomSize = io.sockets.adapter.rooms.get(gameId).size
             console.log("room size while trying to join game:", roomSize)
-            // check room capacity
-            if (roomSize >= 2) {
+            const game = await prisma.game.findUnique({
+                where: {
+                    id: gameId,
+                },
+                include: {
+                    Players: true,
+                },
+            })
+            const gamePlayersCount = game.Players.length
+            // check room/game capacity
+            if (roomSize >= 2 || gamePlayersCount === 2) {
                 console.log("Game full")
-                errorMsg = "Game full"
-            } else if (roomSize === 1) {
+                errorMsg = "Game is full"
+            } else if (roomSize === 1 && gamePlayersCount === 1) {
                 socket.join(gameId)
                 await createPlayer({ playerId, gameId })
                 await createGameboard({ playerId })
@@ -75,25 +80,19 @@ io.on("connection", (socket) => {
                 const game = await getGame({ gameId })
                 console.log(game)
 
-                io.to(gameId).emit("userJoin", {
-                    msg: "User has joined",
-                    game,
-                })
+                io.to(gameId).emit("userJoin", game)
                 joined = true
             }
         } else {
             console.log("Game does not exist")
             errorMsg = "Game does not exist"
         }
-        // const room = io.sockets.adapter.rooms.get(gameId)
-        // console.log(room)
-        // console.log("Room size:", room.size)
 
         callback({ joined, errorMsg, gameId, playerId })
     })
 
-    socket.on("placeShips", async ({ gameId, playerId, userShipCoordsSelection }) => {
-        console.log("placeShips() " + "playerId: " + playerId)
+    socket.on("placeShips", async ({ gameId, playerId, userShipCoordsSelection }, callback) => {
+        // console.log("placeShips() " + "playerId: " + playerId)
         try {
             const gameboard = await getGameBoard({ playerId })
 
@@ -129,11 +128,21 @@ io.on("connection", (socket) => {
                         increment: 1,
                     },
                 },
+                include: {
+                    Players: {
+                        include: {
+                            gameBoard: {
+                                include: {
+                                    Coordinates: true,
+                                    Ships: true,
+                                },
+                            },
+                        },
+                    },
+                },
             })
+            callback({ game })
             if (game.playersReadyCount === 2) {
-                const game = await getGame({ gameId })
-                console.log("Game ready game: ", game)
-
                 io.to(gameId).emit("startGame", game)
             }
         } catch (error) {
@@ -143,10 +152,10 @@ io.on("connection", (socket) => {
 
     socket.on("attackSpot", async ({ gameId, playerId, oppId, oppBoardId, row, col }, callback) => {
         try {
-            console.log("attack-spot event")
-            console.log("Row: ", row)
-            console.log("Col: ", col)
-            console.log("Opponent board id: ", oppBoardId)
+            // console.log("attack-spot event")
+            // console.log("Row: ", row)
+            // console.log("Col: ", col)
+            // console.log("Opponent board id: ", oppBoardId)
             const shipCoord = await prisma.coordinate.findFirst({
                 where: {
                     gameBoardId: oppBoardId,
@@ -158,6 +167,7 @@ io.on("connection", (socket) => {
                 },
             })
             const isHit = shipCoord ? true : false
+
             if (isHit) {
                 await prisma.coordinate.update({
                     where: {
@@ -226,21 +236,50 @@ io.on("connection", (socket) => {
         }
     })
 
+    socket.on("retrieve-game", async (gameId, callback) => {
+        try {
+            socket.gameId = gameId
+            const game = await getGame({ gameId })
+            if (game) {
+                socket.join(gameId)
+            }
+            callback({ game })
+        } catch (error) {
+            console.log(error)
+        }
+    })
+
     socket.on("endGame", async (gameId) => {
         try {
-            await prisma.game.delete({
-                where: {
-                    id: gameId,
-                },
-            })
+            await deleteGame({ gameId })
             io.to(gameId).emit("endGame")
+        } catch (error) {
+            console.log(error)
+        }
+    })
+
+    socket.on("disconnect", async () => {
+        try {
+            const gameId = socket.gameId
+            // console.log("disconnected, socket.gameId:", gameId)
+            const room = io.sockets.adapter.rooms.get(gameId)
+            // console.log("found room", room ? true : false)
+
+            if (room && room.size === 0) {
+                // console.log("room size is 0")
+                await prisma.game.delete({
+                    where: {
+                        id: gameId,
+                    },
+                })
+            }
         } catch (error) {
             console.log(error)
         }
     })
 })
 
-PORT = 3000
+PORT = process.env.PORT || 3000
 server.listen(PORT, () => {
-    console.log(`server running at PORT ${PORT} !`)
+    console.log(`server running on PORT ${PORT} !`)
 })
